@@ -2,23 +2,31 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 
 	"github.com/gorilla/websocket"
 )
 
+type message struct {
+	Id       string
+	Body     string
+	LocalUrl string
+	Header   map[string][]string
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("usage: go-cli <client-id> [ws-url]")
+	if len(os.Args) <= 2 {
+		log.Fatal("usage: go-cli <client-id> [local-url]")
 	}
 	id := os.Args[1]
-	serverURL := "ws://localhost:8000/ws?id=" + id
-	if len(os.Args) > 2 {
-		serverURL = os.Args[2] + "?id=" + id
-	}
+	localUrl := os.Args[2]
+	serverURL := "ws://localhost:8000/ws?id=" + id + "&localUrl=" + localUrl
 
 	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
 	if err != nil {
@@ -32,12 +40,28 @@ func main() {
 	// receive messages in background
 	go func() {
 		for {
-			_, msg, err := conn.ReadMessage()
+			msg := message{}
+			err := conn.ReadJSON(&msg)
 			if err != nil {
-				log.Println("disconnected:", err)
-				os.Exit(0)
+				log.Println("read error:", err)
+				return
 			}
-			fmt.Println("server:", string(msg))
+			fmt.Printf("Received message: id=%s, body=%s, localUrl=%s, header=%v\n", msg.Id, msg.Body, msg.LocalUrl, msg.Header)
+			resp, err := SendRequestToLocalServer(msg.LocalUrl, []byte(msg.Body), msg.Header)
+			if err != nil {
+				log.Println("error sending request to local server:", err)
+				continue
+			}
+			fmt.Printf("Response from local server: %s\n", resp)
+			// send response back to relay server
+			responseMsg := message{Id: id, Body: resp, LocalUrl: localUrl}
+			err = conn.WriteJSON(responseMsg)
+			if err != nil {
+				log.Println("write error:", err)
+				return
+			}
+			log.Println("sent response back to relay server")
+
 		}
 	}()
 
@@ -64,4 +88,30 @@ func main() {
 			return
 		}
 	}
+}
+
+func SendRequestToLocalServer(localUrl string, body []byte, header map[string][]string) (string, error) {
+	httpClient := &http.Client{}
+	req, err := http.NewRequest("POST", localUrl, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	for key, values := range header {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(respBody), nil
 }

@@ -1,6 +1,7 @@
 package socket
 
 import (
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -8,19 +9,32 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type client = struct {
+	LocalUrl string
+	conn     *websocket.Conn
+}
+
+type message struct {
+	Id       string
+	Body     string
+	LocalUrl string
+	Header   http.Header
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 var (
-	clients   = map[string]*websocket.Conn{}
+	clients   = map[string]chan client{}
 	clientsMu sync.Mutex
 )
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "id param required", http.StatusBadRequest)
+	localUrl := r.URL.Query().Get("localUrl")
+	if id == "" || localUrl == "" {
+		http.Error(w, "id and localUrl params required", http.StatusBadRequest)
 		return
 	}
 
@@ -31,6 +45,10 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		clientsMu.Lock()
+		clientCh, ok := clients[id]
+		if ok {
+			close(clientCh)
+		}
 		delete(clients, id)
 		clientsMu.Unlock()
 		conn.Close()
@@ -38,7 +56,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	clientsMu.Lock()
-	clients[id] = conn
+	clients[id] = make(chan client, 1)
+	clients[id] <- client{LocalUrl: localUrl, conn: conn}
 	clientsMu.Unlock()
 	log.Println("connected:", id)
 
@@ -47,22 +66,28 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		log.Printf("[%s] received: %s", id, msg)
-		conn.WriteMessage(msgType, msg)
+		log.Printf("[%s] received: %s", id, msg, "msgType:", msgType)
+		// conn.WriteMessage(msgType, msg)
 	}
 }
 
 // POST /send?id=abc&msg=hello
 func HandleSend(w http.ResponseWriter, r *http.Request) {
 	id := r.FormValue("id")
-	msg := r.FormValue("msg")
-	if id == "" || msg == "" {
-		http.Error(w, "id and msg params required", http.StatusBadRequest)
+	// msg := r.FormValue("msg")
+	// if id == "" || msg == "" {
+	// 	http.Error(w, "id and msg params required", http.StatusBadRequest)
+	// 	return
+	// }
+	body, err := io.ReadAll(r.Body)
+	header := r.Header
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
 
 	clientsMu.Lock()
-	conn, ok := clients[id]
+	clientCh, ok := clients[id]
 	clientsMu.Unlock()
 
 	if !ok {
@@ -70,6 +95,20 @@ func HandleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn.WriteMessage(websocket.TextMessage, []byte(msg))
+	select {
+	case client := <-clientCh:
+		jsonData := message{Id: id, Body: string(body), LocalUrl: client.LocalUrl, Header: header}
+		log.Println("sending message to:", id, "json:", jsonData)
+		err := client.conn.WriteJSON(jsonData)
+		clientCh <- client
+		if err != nil {
+			log.Println("write error:", err)
+			http.Error(w, "failed to send message", http.StatusInternalServerError)
+			return
+		}
+	default:
+		http.Error(w, "client not connected", http.StatusBadRequest)
+		return
+	}
 	w.Write([]byte("sent"))
 }
