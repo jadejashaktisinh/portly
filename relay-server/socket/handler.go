@@ -66,7 +66,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		log.Printf("[%s] received: %s", id, msg, "msgType:", msgType)
+		log.Printf("[%s] received: %s Messsage Type : %d", id, msg, msgType)
 		// conn.WriteMessage(msgType, msg)
 	}
 }

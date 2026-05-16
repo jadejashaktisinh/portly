@@ -1,0 +1,4 @@
+go-cli
+go.mod
+go.sum
+.env
