@@ -19,10 +19,11 @@ import (
 )
 
 type message struct {
-	Id       string
-	Body     string
-	LocalUrl string
-	Header   map[string][]string
+	Id        string
+	Body      string
+	LocalUrl  string
+	Header    map[string][]string
+	RequestId string
 }
 
 // forwardCmd represents the forward command
@@ -93,7 +94,7 @@ func forward(localUrl string) {
 	fmt.Println("type a message and press Enter (Ctrl+C to quit)")
 
 	// receive messages in background
-	go listener(conn)
+	listener(conn)
 
 }
 
@@ -101,19 +102,19 @@ func listener(conn *websocket.Conn) {
 	for {
 		msg := message{}
 		err := conn.ReadJSON(&msg)
+		log.Printf("Received message: %+v\n", msg)
 		if err != nil {
 			log.Println("read error:", err)
 			return
 		}
-		fmt.Printf("Received message: id=%s, body=%s, localUrl=%s, header=%v\n", msg.Id, msg.Body, msg.LocalUrl, msg.Header)
 		resp, err := SendRequestToLocalServer(msg.LocalUrl, []byte(msg.Body), msg.Header)
 		if err != nil {
 			log.Println("error sending request to local server:", err)
 			continue
 		}
-		fmt.Printf("Response from local server: %s\n", resp)
+		// fmt.Printf("Response from local server: %s\n", resp)
 		// send response back to relay server
-		responseMsg := message{Id: msg.Id, Body: resp, LocalUrl: msg.LocalUrl, Header: msg.Header}
+		responseMsg := message{Id: msg.Id, Body: resp, LocalUrl: msg.LocalUrl, RequestId: msg.RequestId}
 		err = conn.WriteJSON(responseMsg)
 		if err != nil {
 			log.Println("write error:", err)
