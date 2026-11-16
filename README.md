@@ -1,0 +1,172 @@
+# Portly
+
+Portly is a lightweight tunneling and webhook forwarding service. It exposes a local HTTP server to the internet through a relay server and forwards incoming webhook requests to it, similar to ngrok or a self-hosted webhook relay.
+
+## How it works
+
+```
+Webhook / HTTP request
+        │
+        ▼
+  Relay Server  ──(WebSocket)──▶  Portly CLI  ──(HTTP POST)──▶  Local server
+        ▲                                                          │
+        └──────────────── response body ───────────────────────────┘
+```
+
+1. The CLI authenticates against the API server (`node-backend`) and stores your API key in the OS keyring.
+2. `portly forward <local-url>` opens a WebSocket connection to the relay server, identified by your API key.
+3. Requests received by the relay server are pushed to the CLI over the WebSocket.
+4. The CLI replays each request as an HTTP `POST` to your local URL and sends the response back through the relay to the original caller.
+
+## Repository structure
+
+```
+portly/
+├── go-cli/          # Go CLI client (login + forward)
+├── node-backend/    # Express + Prisma API server (auth, API keys)
+├── relay-server/    # Go WebSocket relay + webhook receiver
+├── docker-compose.yml
+├── test-webhook.js  # Sample local webhook receiver
+└── .env.example
+```
+
+| Component       | Stack                              | Default port | Purpose                                             |
+| --------------- | ---------------------------------- | ------------ | --------------------------------------------------- |
+| `node-backend`  | Node.js, Express, Prisma, Postgres | `3000`       | Signup/login, issues JWT and permanent API keys     |
+| `relay-server`  | Go, Gorilla WebSocket, pgx         | `8000`       | `/ws` client connections, `/webhook` ingestion      |
+| `go-cli`        | Go, Cobra, go-keyring              | —            | `portly login` and `portly forward` commands        |
+
+See [`go-cli/README.md`](go-cli/README.md) for CLI-specific documentation.
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose (for PostgreSQL)
+- Go 1.26+
+- Node.js 20+ and npm
+- A system keyring backend for the CLI (Keychain on macOS, Secret Service on Linux, Credential Manager on Windows)
+
+## Getting started
+
+### 1. Start PostgreSQL
+
+From the repository root:
+
+```bash
+cp .env.example .env
+# fill in POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+docker compose up -d
+```
+
+### 2. Run the API server
+
+```bash
+cd node-backend
+cp .env.example .env
+# DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<db>
+# JWT_SECRET=<random-secret>
+npm install
+npx prisma migrate dev
+npm run dev
+```
+
+The server listens on `http://localhost:3000` by default and exposes:
+
+| Method | Route          | Description                                  |
+| ------ | -------------- | -------------------------------------------- |
+| `POST` | `/auth/signup` | Create a user; returns JWT and API key       |
+| `POST` | `/auth/login`  | Authenticate; returns JWT and API key        |
+
+Signup body: `{ "email": "...", "password": "...", "slug": "..." }`. The `slug` is stored on the user for future subdomain-based routing.
+
+### 3. Run the relay server
+
+```bash
+cd relay-server
+# create .env with:
+# DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<db>
+go mod download
+go run .
+```
+
+The relay listens on `http://localhost:8000`:
+
+| Route      | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| `/`        | Health check                                                       |
+| `/ws`      | WebSocket endpoint for CLI clients (`?id=<apiKey>&localUrl=<url>`) |
+| `/webhook` | Incoming webhook endpoint (`?id=<apiKey>`)                         |
+
+### 4. Build and use the CLI
+
+```bash
+cd go-cli
+cp .env.example .env
+# NODE_SERVER_URL=http://localhost:3000
+# RELAY_SERVER_URL=http://localhost:8000
+# CLI_SERVICE_NAME=portly
+# CLI_USER_NAME=<account label>
+go build -o portly
+./portly login
+./portly forward http://localhost:3001/webhook
+```
+
+### 5. Send a test webhook
+
+Start the sample receiver in another terminal:
+
+```bash
+node test-webhook.js
+```
+
+With the CLI forwarding to `http://localhost:3001/webhook`, send a request to the relay:
+
+```bash
+curl -X POST "http://localhost:8000/webhook?id=<your-api-key>" \
+  -H "Host: demo.localhost:8000" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"test","message":"hello from portly"}'
+```
+
+The `Host` header must contain a dot because the relay splits it to extract the user slug. The request is forwarded to your local server and its response is returned through the relay.
+
+## Configuration
+
+### Root `.env` (Docker Compose)
+
+| Variable            | Description             |
+| ------------------- | ----------------------- |
+| `POSTGRES_USER`     | PostgreSQL username     |
+| `POSTGRES_PASSWORD` | PostgreSQL password     |
+| `POSTGRES_DB`       | PostgreSQL database name |
+
+### `node-backend/.env`
+
+| Variable       | Description                          |
+| -------------- | ------------------------------------ |
+| `DATABASE_URL` | PostgreSQL connection string         |
+| `JWT_SECRET`   | Secret used to sign and verify JWTs  |
+
+An optional `PORT` environment variable overrides the default port `3000`.
+
+### `relay-server/.env`
+
+| Variable       | Description                  |
+| -------------- | ---------------------------- |
+| `DATABASE_URL` | PostgreSQL connection string |
+
+### `go-cli/.env`
+
+| Variable           | Description                                      |
+| ------------------ | ------------------------------------------------ |
+| `NODE_SERVER_URL`  | Base URL of the API server (used by `login`)     |
+| `RELAY_SERVER_URL` | Base URL of the relay server (used by `forward`) |
+| `CLI_SERVICE_NAME` | Keyring service name used to store the API key   |
+| `CLI_USER_NAME`    | Keyring account name used to store the API key   |
+
+## Development notes
+
+- The relay server currently routes webhooks by the `id` query parameter (the user's API key) rather than the `Host` header. Host parsing for slug-based routing is scaffolded but not enforced.
+- The relay caps forwarded request bodies at 1 MB.
+- The CLI replays all forwarded requests as `POST`, passing along the original headers and body.
+- The API server stores users in PostgreSQL via Prisma; run `npx prisma migrate dev` after schema changes.
+- The webhook handler writes a greeting before forwarding, so the local server's status code and response headers are not propagated to the caller; only the body is appended.
