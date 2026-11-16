@@ -11,5 +11,6 @@ model User {
   email     String   @unique
   password  String
   apiKey    String   @unique
+  slug      String   @unique
   createdAt DateTime @default(now())
 }

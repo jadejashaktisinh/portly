@@ -34,6 +34,10 @@ var forwardCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
+		if len(args) < 1 {
+			fmt.Println("Provide local url to forward")
+			return
+		}
 		localUrl := args[0]
 		forward(localUrl)
 
