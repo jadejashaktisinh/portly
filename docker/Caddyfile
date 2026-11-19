@@ -1,0 +1,17 @@
+:{$PORT:10000} {
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /ws* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /webhook* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

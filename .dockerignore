@@ -1,0 +1,11 @@
+.git
+.env
+**/.env
+node_modules
+**/node_modules
+dist
+**/dist
+*.log
+go-cli/go-cli
+go-cli/portly
+coverage
