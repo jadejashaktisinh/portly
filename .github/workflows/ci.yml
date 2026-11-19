@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-cli/go.mod
+          cache-dependency-path: go-cli/go.sum
+      - name: Build, vet and test
+        working-directory: go-cli
+        run: go build ./... && go vet ./... && go test ./...
+
+  relay-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: relay-server/go.mod
+          cache-dependency-path: relay-server/go.sum
+      - name: Build, vet and test
+        working-directory: relay-server
+        run: go build ./... && go vet ./... && go test ./...
+
+  node-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: node-backend/package-lock.json
+      - run: npm ci
+        working-directory: node-backend
+      - run: npx prisma generate
+        working-directory: node-backend
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      - name: Typecheck and test
+        working-directory: node-backend
+        run: npx tsc --noEmit && npm test
