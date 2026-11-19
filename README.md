@@ -141,10 +141,10 @@ The `Host` header must contain a dot because the relay splits it to extract the 
 
 ### 6. Inspect delivery history
 
-Every authenticated webhook is recorded in the shared PostgreSQL database. Use the JWT from signup/login to list the last 50 deliveries:
+Every authenticated webhook is recorded in the shared PostgreSQL database. Use the JWT from signup/login to list the last 50 deliveries (locally, replace the host with `http://localhost:3000`):
 
 ```bash
-curl -H "Authorization: Bearer <jwt>" "http://localhost:3000/events?limit=50&offset=0"
+curl -H "Authorization: Bearer <jwt>" "https://portly-wscl.onrender.com/events?limit=50&offset=0"
 ```
 
 Each entry contains the `requestId`, method, host, slug, path, headers, body, response status code, duration in milliseconds, any error, and a timestamp. `GET /events/:id` returns a single entry. Requests with an invalid API key are rejected before logging and are not stored.
@@ -202,7 +202,7 @@ The whole server side deploys as **one Render Web Service** from the root `Docke
    - `JWT_SECRET` — a long random string
    - `PORT=10000` (Render sets this automatically)
 4. The container entrypoint runs `npx prisma migrate deploy`, then starts the relay, API and Caddy. Any process exiting stops the service so Render can restart it.
-5. Point a free scheduler (e.g. cron-job.org) at `https://<your-service>.onrender.com/healthz` every ~10 minutes. This keeps the service inside Render's 750 free instance-hours/month and keeps Supabase active.
+5. Point a free scheduler (e.g. cron-job.org) at `https://portly-wscl.onrender.com/healthz` every ~10 minutes. This keeps the service inside Render's 750 free instance-hours/month and keeps Supabase active.
 
 **Limits to be aware of:** one free service shares CPU/memory between both apps; deployments drop active WebSockets (the CLI reconnects automatically); free tiers have no SLA.
 

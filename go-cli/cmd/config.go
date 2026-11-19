@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	defaultAPIServerURL   = "https://portly.onrender.com"
-	defaultRelayServerURL = "wss://portly.onrender.com"
+	defaultAPIServerURL   = "https://portly-wscl.onrender.com"
+	defaultRelayServerURL = "wss://portly-wscl.onrender.com"
 	defaultKeyringService = "portly"
 	relayPingInterval     = 60 * time.Second
 )

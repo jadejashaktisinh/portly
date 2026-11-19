@@ -43,8 +43,8 @@ The CLI works out of the box against the hosted service. Configuration precedenc
 
 | Flag                | Environment variables                     | Default                            |
 | ------------------- | ----------------------------------------- | ---------------------------------- |
-| `--api-url`         | `PORTLY_API_URL`, `NODE_SERVER_URL`       | `https://portly.onrender.com`      |
-| `--relay-url`       | `PORTLY_RELAY_URL`, `RELAY_SERVER_URL`    | `wss://portly.onrender.com`        |
+| `--api-url`         | `PORTLY_API_URL`, `NODE_SERVER_URL`       | `https://portly-wscl.onrender.com` |
+| `--relay-url`       | `PORTLY_RELAY_URL`, `RELAY_SERVER_URL`    | `wss://portly-wscl.onrender.com`   |
 | `--keyring-service` | `PORTLY_KEYRING_SERVICE`, `CLI_SERVICE_NAME` | `portly`                        |
 | `--keyring-user`    | `PORTLY_KEYRING_USER`, `CLI_USER_NAME`    | current OS username                |
 
