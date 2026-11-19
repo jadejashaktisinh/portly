@@ -12,6 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const clientIdleTimeout = 3 * time.Minute
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -51,6 +53,16 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		hub.RemoveClient(id, conn)
 	}()
 
+	conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
+	conn.SetPingHandler(func(message string) error {
+		conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
+		return conn.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second))
+	})
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
+		return nil
+	})
+
 	if !hub.AddClient(id, localUrl, conn) {
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "duplicate client"))
 		return
@@ -63,6 +75,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			log.Println("read error:", err)
 			return
 		}
+		conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
 		log.Printf("received response for requestId: %s", msg.RequestId)
 
 		statusCode := msg.StatusCode

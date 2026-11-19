@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,8 +37,8 @@ type WebhookEvent struct {
 }
 
 func Connect() {
-	if err := godotenv.Load(); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("could not load .env file: %v", err)
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -45,9 +46,14 @@ func Connect() {
 		log.Fatal("DATABASE_URL is not set")
 	}
 
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		log.Fatalf("Invalid DATABASE_URL: %v", err)
+	}
+	cfg.MaxConns = maxConnections()
+
 	fmt.Println("Connecting to database...")
-	var err error
-	pool, err = pgxpool.New(context.Background(), dsn)
+	pool, err = pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		log.Fatalf("Unable to create connection pool: %v", err)
 	}
@@ -81,6 +87,15 @@ func FindUserByAPIKey(ctx context.Context, key string) (User, bool, error) {
 		return User{}, false, err
 	}
 	return User{ID: id}, true, nil
+}
+
+func Ping(ctx context.Context) error {
+	if pool == nil {
+		return errors.New("database not connected")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return pool.Ping(ctx)
 }
 
 func ValidateAPIKey(ctx context.Context, key string) (bool, error) {
@@ -118,6 +133,16 @@ func RecordWebhookEvent(ctx context.Context, event WebhookEvent) error {
 		nullableString(event.Error),
 	)
 	return err
+}
+
+func maxConnections() int32 {
+	max := 5
+	if raw := os.Getenv("DB_MAX_CONNS"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			max = parsed
+		}
+	}
+	return int32(max)
 }
 
 func nullableString(value string) any {
