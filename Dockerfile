@@ -24,6 +24,7 @@ COPY --from=api-build /app/package.json ./package.json
 COPY --from=api-build /app/dist ./dist
 COPY --from=api-build /app/prisma ./prisma
 COPY --from=api-build /app/prisma.config.ts ./prisma.config.ts
+COPY dashboard ./dashboard
 
 COPY --from=relay-build /out/relay /usr/local/bin/relay
 COPY --from=caddy-bin /usr/bin/caddy /usr/local/bin/caddy

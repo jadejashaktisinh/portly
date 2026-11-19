@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portly — Webhook Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <section id="auth-view" class="auth-card">
+        <div class="brand">
+          <span class="brand-mark">P</span>
+          <div>
+            <h1>Portly</h1>
+            <p>Webhook delivery dashboard</p>
+          </div>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button id="tab-login" class="tab active" type="button">Sign in</button>
+          <button id="tab-signup" class="tab" type="button">Create account</button>
+        </div>
+
+        <form id="auth-form" autocomplete="on">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="email" />
+
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" />
+
+          <div id="slug-field" class="hidden">
+            <label for="slug">Slug</label>
+            <input id="slug" name="slug" type="text" pattern="[a-z0-9-]+" minlength="1" maxlength="40" placeholder="my-service" />
+            <small>Lowercase letters, digits and hyphens.</small>
+          </div>
+
+          <p id="auth-error" class="error hidden" role="alert"></p>
+          <button id="auth-submit" class="primary" type="submit">Sign in</button>
+        </form>
+      </section>
+
+      <section id="dashboard-view" class="hidden">
+        <header class="topbar">
+          <div class="brand compact">
+            <span class="brand-mark">P</span>
+            <div>
+              <h1>Portly</h1>
+              <p id="user-label"></p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button id="refresh" class="ghost" type="button">Refresh</button>
+            <button id="logout" class="ghost" type="button">Sign out</button>
+          </div>
+        </header>
+
+        <main class="content">
+          <div class="summary">
+            <div class="stat">
+              <span class="stat-label">Deliveries</span>
+              <strong id="total-count">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Last delivery</span>
+              <strong id="last-delivery">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Auto-refresh</span>
+              <strong>30s</strong>
+            </div>
+          </div>
+
+          <p id="dashboard-error" class="error hidden" role="alert"></p>
+
+          <div class="panels">
+            <section class="panel list-panel">
+              <div class="panel-heading">
+                <h2>Recent webhooks</h2>
+                <span id="list-count" class="muted"></span>
+              </div>
+              <div id="event-list" class="event-list">
+                <p class="empty">No deliveries yet. Send a webhook to your relay URL.</p>
+              </div>
+            </section>
+
+            <section class="panel detail-panel">
+              <div class="panel-heading">
+                <h2>Details</h2>
+                <button id="copy-id" class="ghost small hidden" type="button">Copy request ID</button>
+              </div>
+              <div id="event-detail">
+                <p class="empty">Select a delivery to inspect it.</p>
+              </div>
+            </section>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
