@@ -128,7 +128,7 @@ Start the sample receiver in another terminal:
 node test-webhook.js
 ```
 
-With the CLI forwarding to `http://localhost:3001/webhook`, send a request to the relay:
+With the CLI forwarding to `http://localhost:3001/webhook`, send a request to the local relay:
 
 ```bash
 curl -X POST "http://localhost:8000/webhook?id=<your-api-key>" \
@@ -137,7 +137,15 @@ curl -X POST "http://localhost:8000/webhook?id=<your-api-key>" \
   -d '{"event":"test","message":"hello from portly"}'
 ```
 
-The `Host` header must contain a dot because the relay splits it to extract the user slug. The request is forwarded to your local server; its status code, headers and body are returned to the original caller. Use the API key from `portly login` as `id`.
+The `Host` header must contain a dot because the relay splits it to extract the user slug. For the hosted service, **do not override `Host`** — the deployment hostname (`portly-wscl.onrender.com`) already contains dots, and Cloudflare rejects spoofed hosts:
+
+```bash
+curl -X POST "https://portly-wscl.onrender.com/webhook?id=<your-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"test","message":"hello from portly"}'
+```
+
+The request is forwarded to your local server; its status code, headers and body are returned to the original caller. Use the API key from `portly login` as `id`.
 
 ### 6. Inspect delivery history
 
