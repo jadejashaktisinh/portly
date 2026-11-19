@@ -14,7 +14,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
 )
@@ -82,21 +81,16 @@ func init() {
 }
 
 func login(email, password string) {
-
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	serverUrl := os.Getenv("NODE_SERVER_URL")
-	service := os.Getenv("CLI_SERVICE_NAME")
-	user := os.Getenv("CLI_USER_NAME")
+	serverURL := apiServerURL()
+	service := keyringService()
+	user := keyringUser()
 
 	payload, err := json.Marshal(loginRequest{Email: email, Password: password})
 	if err != nil {
 		log.Fatal("Error encoding login request:", err)
 	}
 
-	res, err := http.Post(serverUrl+"/auth/login", "application/json", bytes.NewReader(payload))
+	res, err := http.Post(serverURL+"/auth/login", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Fatal("Error sending login request:", err)
 	}

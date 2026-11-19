@@ -10,12 +10,10 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
 )
@@ -49,15 +47,11 @@ var hopByHopHeaders = map[string]struct{}{
 }
 
 var forwardCmd = &cobra.Command{
-	Use:   "forward",
-	Short: "forward command is used to forward requests from the relay server to the local server",
-	Long:  `forward command is used to forward requests from the relay server to the local server. It connects to the relay server using a websocket connection, listens for incoming messages, and forwards them to the local server. It also sends the response back to the relay server.`,
-
+	Use:   "forward <local-url>",
+	Short: "Forward relay requests to a local server",
+	Long:  `Connect to the Portly relay over WebSocket, forward every incoming request to a local HTTP server as POST, and send the response back to the caller.`,
+	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) < 1 {
-			fmt.Println("Provide local url to forward")
-			return
-		}
 		forward(args[0])
 	},
 }
@@ -66,51 +60,95 @@ func init() {
 	rootCmd.AddCommand(forwardCmd)
 }
 
-func forward(localUrl string) {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	service := os.Getenv("CLI_SERVICE_NAME")
-	user := os.Getenv("CLI_USER_NAME")
+func forward(localURL string) {
+	service := keyringService()
+	user := keyringUser()
 	secret, err := keyring.Get(service, user)
 	if err != nil {
 		log.Fatalf("Failed to get API key: %v", err)
 	}
 
-	fmt.Printf("Local URL: %s\n", localUrl)
-	baseStr := os.Getenv("RELAY_SERVER_URL")
-	u, err := url.Parse(baseStr)
+	relayURL, err := buildRelayURL(secret, localURL)
 	if err != nil {
-		log.Fatal("Invalid RELAY_SERVER_URL base path:", err)
+		log.Fatal("Invalid relay URL:", err)
 	}
+	displayURL, err := url.Parse(relayURL)
+	if err != nil {
+		log.Fatal("Invalid relay URL:", err)
+	}
+	displayURL.RawQuery = ""
 
+	fmt.Printf("Local URL: %s\n", localURL)
+	fmt.Printf("Relay server: %s\n", displayURL.String())
+	connectLoop(relayURL)
+}
+
+func buildRelayURL(secret, localURL string) (string, error) {
+	u, err := url.Parse(relayServerURL())
+	if err != nil {
+		return "", err
+	}
 	u.Path = "/ws"
 	params := url.Values{}
 	params.Add("id", secret)
-	params.Add("localUrl", localUrl)
+	params.Add("localUrl", localURL)
 	u.RawQuery = params.Encode()
-
-	relayServerURL := u.String()
-	fmt.Printf("Relay server: %s://%s%s\n", u.Scheme, u.Host, u.Path)
-	conn, _, err := websocket.DefaultDialer.Dial(relayServerURL, nil)
-	if err != nil {
-		log.Fatal("connect error:", err)
-	}
-	defer conn.Close()
-
-	fmt.Println("connected to relay; forwarding requests (Ctrl+C to quit)")
-	listener(conn)
+	return u.String(), nil
 }
 
-func listener(conn *websocket.Conn) {
+func connectLoop(relayURL string) {
+	backoff := time.Second
+	for {
+		conn, _, err := websocket.DefaultDialer.Dial(relayURL, nil)
+		if err != nil {
+			log.Printf("relay connection failed: %v; retrying in %s", err, backoff)
+			time.Sleep(backoff)
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		log.Println("connected to relay; forwarding requests (Ctrl+C to quit)")
+		err = listen(conn)
+		conn.Close()
+		if err != nil {
+			log.Printf("relay connection lost: %v", err)
+		}
+
+		backoff = time.Second
+		log.Printf("reconnecting in %s", backoff)
+		time.Sleep(backoff)
+	}
+}
+
+func listen(conn *websocket.Conn) error {
 	var writeMu sync.Mutex
 	sem := make(chan struct{}, 16)
+	done := make(chan struct{})
+
+	ticker := time.NewTicker(relayPingInterval)
+	defer ticker.Stop()
+	defer close(done)
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, []byte("keepalive"), time.Now().Add(5*time.Second)); err != nil {
+					log.Printf("keepalive ping failed: %v", err)
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	for {
 		msg := message{}
 		if err := conn.ReadJSON(&msg); err != nil {
-			log.Println("read error:", err)
-			return
+			return err
 		}
 		log.Printf("received request %s (%d bytes)", msg.RequestId, len(msg.Body))
 
