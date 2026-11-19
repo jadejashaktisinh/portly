@@ -19,11 +19,14 @@ Webhook / HTTP request
 
 ## Prerequisites
 
-- Go 1.26+
-- A running Portly relay server and API server
-- A system keyring backend (Keychain on macOS, Secret Service on Linux, Credential Manager on Windows)
+- A system keyring backend (Keychain on macOS, Secret Service/GNOME Keyring on Linux, Credential Manager on Windows)
+- Either a downloaded binary or Go 1.26+ to build from source
 
-## Build
+## Install
+
+Download the binary for your OS from the [GitHub Releases](../../releases) page, rename it to `portly` and put it on your `PATH`. Tagged `v*` releases are built automatically for Linux, macOS and Windows.
+
+To build from source:
 
 ```bash
 git clone <repository-url>
@@ -34,18 +37,24 @@ go build -o portly
 
 ## Configuration
 
-The CLI reads configuration from a `.env` file in the working directory. Copy the example file and fill in the values:
+The CLI works out of the box against the hosted service. Configuration precedence is:
+
+**flags > environment variables > `.env` file > built-in defaults**
+
+| Flag                | Environment variables                     | Default                            |
+| ------------------- | ----------------------------------------- | ---------------------------------- |
+| `--api-url`         | `PORTLY_API_URL`, `NODE_SERVER_URL`       | `https://portly.onrender.com`      |
+| `--relay-url`       | `PORTLY_RELAY_URL`, `RELAY_SERVER_URL`    | `wss://portly.onrender.com`        |
+| `--keyring-service` | `PORTLY_KEYRING_SERVICE`, `CLI_SERVICE_NAME` | `portly`                        |
+| `--keyring-user`    | `PORTLY_KEYRING_USER`, `CLI_USER_NAME`    | current OS username                |
+
+A `.env` file is optional. For local development, copy the example and fill in the values:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable           | Description                                        |
-| ------------------ | -------------------------------------------------- |
-| `NODE_SERVER_URL`  | Base URL of the API server (used by `login`)       |
-| `RELAY_SERVER_URL` | Base URL of the relay server (used by `forward`)   |
-| `CLI_SERVICE_NAME` | Keyring service name used to store the API key     |
-| `CLI_USER_NAME`    | Keyring account name used to store the API key     |
+To point at a local stack: `./portly forward --api-url http://localhost:3000 --relay-url ws://localhost:8000 http://localhost:3001/webhook`.
 
 ## Usage
 
@@ -63,12 +72,13 @@ You will be prompted for your email and password. On success the API key is save
 ./portly forward http://localhost:3000
 ```
 
-The CLI connects to `RELAY_SERVER_URL/ws` and forwards every incoming request to the given local URL. Press `Ctrl+C` to stop forwarding. Each delivery is recorded by the relay and can be inspected later via `GET /events` on the API server.
+The CLI connects to the relay's `/ws` endpoint and forwards every incoming request to the given local URL. It sends periodic pings to keep the connection alive and reconnects with backoff if the relay restarts. Press `Ctrl+C` to stop forwarding. Each delivery is recorded by the relay and can be inspected later via `GET /events` on the API server.
 
 ### Help
 
 ```bash
 ./portly --help
+./portly --version
 ./portly login --help
 ./portly forward --help
 ```
@@ -79,9 +89,10 @@ The CLI connects to `RELAY_SERVER_URL/ws` and forwards every incoming request to
 go-cli/
 ├── main.go          # Entry point
 ├── cmd/
-│   ├── root.go      # Root Cobra command
+│   ├── root.go      # Root Cobra command and flags
+│   ├── config.go    # Config precedence and defaults
 │   ├── login.go     # `login` command: authentication + keyring storage
-│   └── forward.go   # `forward` command: WebSocket listener and local request forwarding
+│   └── forward.go   # `forward` command: WebSocket listener, reconnect and forwarding
 ├── .env.example     # Environment variable template
 └── go.mod
 ```

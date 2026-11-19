@@ -26,7 +26,11 @@ portly/
 ├── go-cli/          # Go CLI client (login + forward)
 ├── node-backend/    # Express + Prisma API server (auth, API keys, event history)
 ├── relay-server/    # Go WebSocket relay + webhook receiver + delivery logging
-├── docker-compose.yml
+├── docker/          # Caddyfile and container entrypoint
+├── .github/workflows/ # CI and CLI release automation
+├── Dockerfile       # Single image: API + relay + Caddy
+├── docker-compose.yml       # Local development Postgres
+├── docker-compose.prod.yml  # Full stack in one container, locally
 ├── test-webhook.js  # Sample local webhook receiver
 └── .env.example
 ```
@@ -169,6 +173,8 @@ An optional `PORT` environment variable overrides the default port `3000`.
 | Variable       | Description                                               |
 | -------------- | --------------------------------------------------------- |
 | `DATABASE_URL` | PostgreSQL connection string (same database as the API)   |
+| `DB_MAX_CONNS` | Max pgxpool connections (default `5`)                     |
+| `PORT`         | Relay listen port when run directly (default `8000`)      |
 
 ### `go-cli/.env`
 
@@ -178,6 +184,38 @@ An optional `PORT` environment variable overrides the default port `3000`.
 | `RELAY_SERVER_URL` | Base URL of the relay server (used by `forward`) |
 | `CLI_SERVICE_NAME` | Keyring service name used to store the API key   |
 | `CLI_USER_NAME`    | Keyring account name used to store the API key   |
+
+## Deployment (Render + Supabase, free tier)
+
+The whole server side deploys as **one Render Web Service** from the root `Dockerfile`. A Caddy reverse proxy listens on `$PORT` (`10000` on Render) and routes:
+
+| Path              | Target                       |
+| ----------------- | ---------------------------- |
+| `/healthz`        | relay (also pings PostgreSQL)|
+| `/ws`, `/webhook` | relay (`127.0.0.1:8000`)     |
+| everything else   | API (`127.0.0.1:3000`)       |
+
+1. Create a free **Supabase** project and copy its Postgres connection string. Use the IPv4 **session-mode pooler** URL so Render can connect over IPv4. Free projects pause after 7 days of low activity — the keepalive cron below prevents that.
+2. Create a free **Render Web Service**, connect this GitHub repo, select the **Docker** runtime and the Free instance type. Set the health check path to `/healthz`.
+3. Add Render environment variables (no `.env` files are needed or uploaded — they are gitignored):
+   - `DATABASE_URL` — the Supabase connection string
+   - `JWT_SECRET` — a long random string
+   - `PORT=10000` (Render sets this automatically)
+4. The container entrypoint runs `npx prisma migrate deploy`, then starts the relay, API and Caddy. Any process exiting stops the service so Render can restart it.
+5. Point a free scheduler (e.g. cron-job.org) at `https://<your-service>.onrender.com/healthz` every ~10 minutes. This keeps the service inside Render's 750 free instance-hours/month and keeps Supabase active.
+
+**Limits to be aware of:** one free service shares CPU/memory between both apps; deployments drop active WebSockets (the CLI reconnects automatically); free tiers have no SLA.
+
+To test the same image locally:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build
+# API + relay + Caddy on http://localhost:10000
+```
+
+### CLI releases
+
+Pushing a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) triggers `.github/workflows/release.yml`, which builds binaries for Linux, macOS and Windows and attaches them to the GitHub release. The CLI defaults to the hosted API/relay URLs, so a downloaded binary works without a `.env` file.
 
 ## Development notes
 
