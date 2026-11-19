@@ -21,84 +21,137 @@ const (
 	validationTime = 5 * time.Second
 )
 
-var validateAPIKey = db.ValidateAPIKey
+var (
+	validateAPIKey = db.FindUserByAPIKey
+	recordEvent    = db.RecordWebhookEvent
+)
 
-func HandleWebhook(w http.ResponseWriter, r *http.Request) {
-	hostname := r.Host
-	if hostname == "" {
-		http.Error(w, "Host header is required", http.StatusBadRequest)
-		return
-	}
-	slug, domain, found := strings.Cut(hostname, ".")
-	log.Printf("Received webhook request for slug: %s, domain: %s found: %t", slug, domain, found)
-	if !found {
-		http.Error(w, "Invalid Host header format", http.StatusBadRequest)
-		return
-	}
-	HandleSend(w, r)
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
 }
 
-func HandleSend(w http.ResponseWriter, r *http.Request) {
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(body []byte) (int, error) {
+	if s.status == 0 {
+		s.WriteHeader(http.StatusOK)
+	}
+	return s.ResponseWriter.Write(body)
+}
+
+func HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	recorder := &statusRecorder{ResponseWriter: w}
+	started := time.Now()
+	var slug, userID, failure string
+	var body []byte
+	var reqID string
+
+	defer func() {
+		if userID == "" {
+			return
+		}
+		event := db.WebhookEvent{
+			RequestID:  reqID,
+			UserID:     userID,
+			Method:     r.Method,
+			Host:       r.Host,
+			Slug:       slug,
+			Path:       r.URL.Path,
+			Headers:    r.Header,
+			Body:       string(body),
+			StatusCode: recorder.status,
+			DurationMs: int(time.Since(started).Milliseconds()),
+			Error:      failure,
+		}
+		if err := recordEvent(context.Background(), event); err != nil {
+			log.Printf("failed to record webhook event: %v", err)
+		}
+	}()
+
+	fail := func(status int, message string) {
+		failure = message
+		http.Error(recorder, message, status)
+	}
+
+	hostname := r.Host
+	if hostname == "" {
+		fail(http.StatusBadRequest, "Host header is required")
+		return
+	}
+	var domain string
+	var found bool
+	slug, domain, found = strings.Cut(hostname, ".")
+	log.Printf("Received webhook request for slug: %s, domain: %s found: %t", slug, domain, found)
+	if !found {
+		fail(http.StatusBadRequest, "Invalid Host header format")
+		return
+	}
+
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		http.Error(w, "id query parameter is required", http.StatusBadRequest)
+		fail(http.StatusBadRequest, "id query parameter is required")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), validationTime)
 	defer cancel()
-	valid, err := validateAPIKey(ctx, id)
+	user, valid, err := validateAPIKey(ctx, id)
 	if err != nil {
 		log.Printf("API key validation failed: %v", err)
-		http.Error(w, "could not validate API key", http.StatusServiceUnavailable)
+		fail(http.StatusServiceUnavailable, "could not validate API key")
 		return
 	}
 	if !valid {
-		http.Error(w, "invalid API key", http.StatusUnauthorized)
+		fail(http.StatusUnauthorized, "invalid API key")
 		return
 	}
+	userID = user.ID
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-	body, err := io.ReadAll(r.Body)
+	r.Body = http.MaxBytesReader(recorder, r.Body, maxBodySize)
+	body, err = io.ReadAll(r.Body)
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			fail(http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		fail(http.StatusBadRequest, "failed to read request body")
 		return
 	}
 	defer r.Body.Close()
 	log.Printf("received webhook request (%d bytes)", len(body))
 
-	reqId, err := GenerateRandomID(8)
+	reqID, err = GenerateRandomID(8)
 	if err != nil {
 		log.Printf("failed to generate request id: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		fail(http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	client, ok := hub.GetClient(id)
 	if !ok {
-		http.Error(w, "client not connected", http.StatusNotFound)
+		fail(http.StatusNotFound, "client not connected")
 		return
 	}
 
-	responseCh := hub.CreateLocalResponseChannel(reqId)
-	defer hub.RemoveLocalResponse(reqId)
+	responseCh := hub.CreateLocalResponseChannel(reqID)
+	defer hub.RemoveLocalResponse(reqID)
 
 	jsonData := hub.Message{
 		Id:        id,
 		Body:      string(body),
 		LocalUrl:  client.LocalUrl,
 		Header:    r.Header,
-		RequestId: reqId,
+		RequestId: reqID,
 	}
-	log.Printf("forwarding request %s to %s", reqId, client.LocalUrl)
+	log.Printf("forwarding request %s to %s", reqID, client.LocalUrl)
 	if err := hub.SendToClient(id, jsonData); err != nil {
-		log.Printf("failed to forward request %s: %v", reqId, err)
-		http.Error(w, "failed to send message", http.StatusBadGateway)
+		log.Printf("failed to forward request %s: %v", reqID, err)
+		fail(http.StatusBadGateway, "failed to send message")
 		return
 	}
 
@@ -106,14 +159,14 @@ func HandleSend(w http.ResponseWriter, r *http.Request) {
 	case localResponse := <-responseCh:
 		for key, values := range localResponse.Header {
 			for _, value := range values {
-				w.Header().Add(key, value)
+				recorder.Header().Add(key, value)
 			}
 		}
-		w.WriteHeader(localResponse.StatusCode)
-		w.Write([]byte(localResponse.Body))
+		recorder.WriteHeader(localResponse.StatusCode)
+		recorder.Write([]byte(localResponse.Body))
 	case <-time.After(localTimeout):
-		log.Printf("request %s timed out waiting for local server", reqId)
-		http.Error(w, "local server timed out", http.StatusGatewayTimeout)
+		log.Printf("request %s timed out waiting for local server", reqID)
+		fail(http.StatusGatewayTimeout, "local server timed out")
 	}
 }
 

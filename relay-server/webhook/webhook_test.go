@@ -14,9 +14,32 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func mockValidator(id string) func(context.Context, string) (db.User, bool, error) {
+	if id == "bad" {
+		return func(context.Context, string) (db.User, bool, error) { return db.User{}, false, nil }
+	}
+	return func(context.Context, string) (db.User, bool, error) {
+		return db.User{ID: "user-1"}, true, nil
+	}
+}
+
+func withMocks(t *testing.T, key string) *db.WebhookEvent {
+	t.Helper()
+	validateAPIKey = mockValidator(key)
+	var recorded db.WebhookEvent
+	recordEvent = func(_ context.Context, event db.WebhookEvent) error {
+		recorded = event
+		return nil
+	}
+	t.Cleanup(func() {
+		validateAPIKey = db.FindUserByAPIKey
+		recordEvent = db.RecordWebhookEvent
+	})
+	return &recorded
+}
+
 func TestHandleWebhookPropagatesLocalResponse(t *testing.T) {
-	validateAPIKey = func(context.Context, string) (bool, error) { return true, nil }
-	defer func() { validateAPIKey = db.ValidateAPIKey }()
+	logged := withMocks(t, "test-key")
 
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,11 +116,38 @@ func TestHandleWebhookPropagatesLocalResponse(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "Hello, World") {
 		t.Error("greeting leaked into response")
 	}
+
+	if logged.RequestID == "" {
+		t.Error("event request id was not recorded")
+	}
+	if logged.UserID != "user-1" {
+		t.Errorf("event user id = %q, want user-1", logged.UserID)
+	}
+	if logged.StatusCode != http.StatusCreated {
+		t.Errorf("event status = %d, want %d", logged.StatusCode, http.StatusCreated)
+	}
+	if logged.Body != `{"event":"test"}` {
+		t.Errorf("event body = %q", logged.Body)
+	}
+	if logged.Host != "demo.localhost" || logged.Path != "/webhook" || logged.Slug != "demo" {
+		t.Errorf("event request info = %+v", logged)
+	}
+	if logged.Error != "" {
+		t.Errorf("event error = %q, want empty", logged.Error)
+	}
 }
 
 func TestHandleWebhookRejectsInvalidAPIKey(t *testing.T) {
-	validateAPIKey = func(context.Context, string) (bool, error) { return false, nil }
-	defer func() { validateAPIKey = db.ValidateAPIKey }()
+	validateAPIKey = mockValidator("bad")
+	recordCalled := false
+	recordEvent = func(context.Context, db.WebhookEvent) error {
+		recordCalled = true
+		return nil
+	}
+	t.Cleanup(func() {
+		validateAPIKey = db.FindUserByAPIKey
+		recordEvent = db.RecordWebhookEvent
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook?id=bad", nil)
 	req.Host = "demo.localhost"
@@ -107,11 +157,13 @@ func TestHandleWebhookRejectsInvalidAPIKey(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
+	if recordCalled {
+		t.Error("invalid API key request should not be logged")
+	}
 }
 
 func TestHandleWebhookRejectsOversizedBody(t *testing.T) {
-	validateAPIKey = func(context.Context, string) (bool, error) { return true, nil }
-	defer func() { validateAPIKey = db.ValidateAPIKey }()
+	logged := withMocks(t, "test-key")
 
 	body := strings.NewReader(strings.Repeat("x", (1<<20)+1))
 	req := httptest.NewRequest(http.MethodPost, "/webhook?id=test-key", body)
@@ -121,5 +173,8 @@ func TestHandleWebhookRejectsOversizedBody(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if logged.StatusCode != http.StatusRequestEntityTooLarge || logged.Error != "request body too large" {
+		t.Errorf("event = %+v", logged)
 	}
 }
