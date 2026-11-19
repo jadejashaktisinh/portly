@@ -19,16 +19,17 @@ Webhook / HTTP request
 4. The CLI replays each request as an HTTP `POST` to your local URL and sends the response back through the relay to the original caller.
 5. The relay stores a record of every delivery (request, response status, duration, errors) in PostgreSQL; you can browse it in the web dashboard or through the API server.
 
-## Web dashboard
+## Website and dashboard
 
-The root URL serves a small static dashboard: **https://portly-wscl.onrender.com** (locally, `http://localhost:10000` with the prod compose stack).
+The service also hosts two static pages alongside the API:
 
-- Sign in with your Portly account, or create one from the same page.
-- Browse the 50 most recent webhook deliveries with status, duration and timestamp.
-- Select a delivery to inspect its request headers, full body and request ID.
-- Auto-refreshes every 30 seconds; a manual Refresh button is available.
+| URL | Page |
+| --- | --- |
+| `https://portly-wscl.onrender.com/` | Static home page with an overview and links — no sign-in form |
+| `https://portly-wscl.onrender.com/docs` | API/CLI reference, quick start and limits |
+| `https://portly-wscl.onrender.com/dashboard` | Web dashboard (sign in or create an account) |
 
-The JWT is kept in the browser's `localStorage`; the dashboard calls the same `/auth` and `/events` endpoints as the CLI.
+The dashboard lets you browse the 50 most recent webhook deliveries with status, duration and timestamp, inspect request headers/body/request ID, and auto-refreshes every 30 seconds. Its JWT is kept in the browser's `localStorage`; it calls the same `/auth` and `/events` endpoints as the CLI. Locally, use `http://localhost:10000` with the prod compose stack.
 
 ## Repository structure
 
@@ -37,7 +38,7 @@ portly/
 ├── go-cli/          # Go CLI client (login + forward)
 ├── node-backend/    # Express + Prisma API server (auth, API keys, event history)
 ├── relay-server/    # Go WebSocket relay + webhook receiver + delivery logging
-├── dashboard/       # Static web dashboard (HTML/CSS/JS)
+├── dashboard/       # Static home, docs and dashboard pages (HTML/CSS/JS)
 ├── docker/          # Caddyfile and container entrypoint
 ├── .github/workflows/ # CI and CLI release automation
 ├── Dockerfile       # Single image: API + relay + Caddy
@@ -209,12 +210,13 @@ An optional `PORT` environment variable overrides the default port `3000`.
 
 The whole server side deploys as **one Render Web Service** from the root `Dockerfile`. A Caddy reverse proxy listens on `$PORT` (`10000` on Render) and routes:
 
-| Path                 | Target                         |
-| -------------------- | ------------------------------ |
-| `/healthz`           | relay (also pings PostgreSQL)  |
-| `/ws`, `/webhook`    | relay (`127.0.0.1:8000`)       |
-| `/`, `/app.js`, `/styles.css` | static dashboard files |
-| `/auth`, `/events`   | API (`127.0.0.1:3000`)         |
+| Path                        | Target                         |
+| --------------------------- | ------------------------------ |
+| `/healthz`                  | relay (also pings PostgreSQL)  |
+| `/ws`, `/webhook`           | relay (`127.0.0.1:8000`)       |
+| `/`, `/docs`, `/dashboard`  | static pages                   |
+| `/app.js`, `/styles.css`, `/site.css` | static assets       |
+| `/auth`, `/events`          | API (`127.0.0.1:3000`)         |
 
 1. Create a free **Supabase** project and copy its Postgres connection string. Use the IPv4 **session-mode pooler** URL so Render can connect over IPv4. Free projects pause after 7 days of low activity — the keepalive cron below prevents that.
 2. Create a free **Render Web Service**, connect this GitHub repo, select the **Docker** runtime and the Free instance type. Set the health check path to `/healthz`.

@@ -106,6 +106,29 @@ button {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
 }
 
+.auth-nav {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.auth-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-nav a:hover {
+  color: var(--accent);
+}
+
+.topbar-actions a {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
 .tabs {
   display: flex;
   gap: 6px;

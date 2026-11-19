@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portly — Documentation</title>
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="logo" href="/"><span class="logo-mark">P</span> Portly</a>
+      <nav>
+        <a href="/docs">Docs</a>
+        <a class="nav-cta" href="/dashboard">Dashboard</a>
+      </nav>
+    </header>
+
+    <main class="docs-layout">
+      <nav class="docs-nav">
+        <a href="#overview">Overview</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#cli">CLI reference</a>
+        <a href="#api">API reference</a>
+        <a href="#relay">Relay endpoints</a>
+        <a href="#events">Delivery log</a>
+        <a href="#limits">Limits</a>
+      </nav>
+
+      <article class="docs-content">
+        <h1>Portly documentation</h1>
+        <p>
+          Portly forwards incoming webhooks to a local HTTP server through a relay.
+          The relay validates your API key, pushes the request to the CLI over a
+          WebSocket, and returns the local server's response to the original caller.
+        </p>
+        <p class="note">
+          Hosted endpoints below use <code>https://portly-wscl.onrender.com</code>.
+          The CLI defaults to this host; self-hosted instances use their own URL.
+        </p>
+
+        <h2 id="overview">Overview</h2>
+        <pre class="code-block"><code>Webhook / HTTP request
+        │
+        ▼
+   Relay Server  ──(WebSocket)──▶  Portly CLI  ──(HTTP POST)──▶  Local server
+        ▲                                                          │
+        └──────── status, headers, body ───────────────────────────┘</code></pre>
+        <p>
+          Every authenticated delivery is also written to PostgreSQL and can be
+          inspected through the API or the web dashboard.
+        </p>
+
+        <h2 id="quickstart">Quick start</h2>
+        <h3>1. Install the CLI</h3>
+        <p>
+          Download the binary for your OS from the
+          <a href="https://github.com/jadejashaktisinh/portly/releases">GitHub releases</a>
+          page, rename it to <code>portly</code> and put it on your <code>PATH</code>.
+          Or build from source with <code>cd go-cli &amp;&amp; go build -o portly</code>.
+        </p>
+
+        <h3>2. Sign in</h3>
+        <div class="code-block"><pre><code>portly login</code></pre></div>
+        <p>
+          You'll be prompted for email and password. The API key is stored in your
+          OS keyring (Keychain on macOS, Secret Service on Linux, Credential Manager
+          on Windows). New users can create an account in the
+          <a href="/dashboard">dashboard</a> or via <code>POST /auth/signup</code>.
+        </p>
+
+        <h3>3. Start forwarding</h3>
+        <div class="code-block"><pre><code>portly forward http://localhost:3001/webhook</code></pre></div>
+        <p>The CLI connects to <code>wss://portly-wscl.onrender.com/ws</code> and forwards every request to your local URL as a POST.</p>
+
+        <h3>4. Send a webhook</h3>
+        <div class="code-block"><pre><code>curl -X POST "https://portly-wscl.onrender.com/webhook?id=&lt;your-api-key&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"test","message":"hello from portly"}'</code></pre></div>
+        <p class="note">
+          Do not override the <code>Host</code> header on the hosted service —
+          Cloudflare rejects spoofed hosts. The real hostname already satisfies the
+          relay's dotted-host requirement. Locally, use
+          <code>-H "Host: demo.localhost:8000"</code>.
+        </p>
+
+        <h2 id="cli">CLI reference</h2>
+        <table>
+          <thead><tr><th>Command</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>portly login</code></td><td>Prompt for credentials, log in and store the API key in the OS keyring.</td></tr>
+            <tr><td><code>portly forward &lt;local-url&gt;</code></td><td>Connect to the relay and forward requests to the local URL.</td></tr>
+            <tr><td><code>portly --version</code></td><td>Print the CLI version.</td></tr>
+          </tbody>
+        </table>
+
+        <p>Configuration precedence: <strong>flags &gt; environment variables &gt; <code>.env</code> file &gt; defaults</strong>. A <code>.env</code> file is optional.</p>
+        <table>
+          <thead><tr><th>Flag</th><th>Environment variables</th><th>Default</th></tr></thead>
+          <tbody>
+            <tr><td><code>--api-url</code></td><td><code>PORTLY_API_URL</code>, <code>NODE_SERVER_URL</code></td><td><code>https://portly-wscl.onrender.com</code></td></tr>
+            <tr><td><code>--relay-url</code></td><td><code>PORTLY_RELAY_URL</code>, <code>RELAY_SERVER_URL</code></td><td><code>wss://portly-wscl.onrender.com</code></td></tr>
+            <tr><td><code>--keyring-service</code></td><td><code>PORTLY_KEYRING_SERVICE</code>, <code>CLI_SERVICE_NAME</code></td><td><code>portly</code></td></tr>
+            <tr><td><code>--keyring-user</code></td><td><code>PORTLY_KEYRING_USER</code>, <code>CLI_USER_NAME</code></td><td>your OS username</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="api">API reference</h2>
+        <p>API responses are JSON. Authenticated endpoints require <code>Authorization: Bearer &lt;jwt&gt;</code>. JWTs expire after 7 days.</p>
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>POST</td><td><code>/auth/signup</code></td><td>No</td><td>Create a user. Body: <code>{email, password, slug}</code>. Returns <code>{token, user}</code>.</td></tr>
+            <tr><td>POST</td><td><code>/auth/login</code></td><td>No</td><td>Authenticate. Body: <code>{email, password}</code>. Returns <code>{token, user}</code>.</td></tr>
+            <tr><td>GET</td><td><code>/auth/me</code></td><td>Yes</td><td>Return the authenticated user's id, email, apiKey, slug and createdAt.</td></tr>
+            <tr><td>GET</td><td><code>/events?limit=50&amp;offset=0</code></td><td>Yes</td><td>List deliveries, newest first. <code>limit</code> is capped at 100. Returns <code>{events, total, limit, offset}</code>.</td></tr>
+            <tr><td>GET</td><td><code>/events/:id</code></td><td>Yes</td><td>Return a single delivery. <code>404</code> if it belongs to another user.</td></tr>
+            <tr><td>GET</td><td><code>/healthz</code></td><td>No</td><td>Health check; also pings PostgreSQL.</td></tr>
+          </tbody>
+        </table>
+        <p>Passwords must be at least 8 characters. Slugs are 1–40 lowercase letters, digits or hyphens. Duplicate email or slug returns <code>409</code>; invalid credentials return <code>401</code>.</p>
+
+        <h2 id="relay">Relay endpoints</h2>
+        <table>
+          <thead><tr><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>/webhook?id=&lt;api-key&gt;</code></td><td>Ingests a webhook. Accepts any HTTP method; the CLI replays it as POST.</td></tr>
+            <tr><td><code>/ws?id=&lt;api-key&gt;&amp;localUrl=&lt;url&gt;</code></td><td>WebSocket endpoint used by <code>portly forward</code>.</td></tr>
+          </tbody>
+        </table>
+        <p>Both endpoints validate <code>id</code> against the database. Unknown keys receive <code>401</code> and are not logged.</p>
+
+        <h2 id="events">Delivery log</h2>
+        <p>Each entry in <code>/events</code> contains:</p>
+        <table>
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>requestId</code></td><td>Unique correlation ID shared by the relay and CLI.</td></tr>
+            <tr><td><code>method</code>, <code>host</code>, <code>slug</code>, <code>path</code></td><td>Original request routing information.</td></tr>
+            <tr><td><code>headers</code>, <code>body</code></td><td>Captured request headers and body.</td></tr>
+            <tr><td><code>statusCode</code></td><td>Status returned by the local server.</td></tr>
+            <tr><td><code>durationMs</code></td><td>Total forwarding time in milliseconds.</td></tr>
+            <tr><td><code>error</code></td><td>Failure reason, if any.</td></tr>
+            <tr><td><code>createdAt</code></td><td>Timestamp of the delivery.</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="limits">Limits &amp; behaviour</h2>
+        <ul>
+          <li>Request bodies larger than 1 MB are rejected with <code>413</code>.</li>
+          <li>A webhook waits at most 30 seconds for the local server; after that the caller gets <code>504</code>.</li>
+          <li>The CLI uses a 25 second HTTP timeout per local request and returns <code>502</code> on failure.</li>
+          <li>Up to 16 local requests are processed in parallel by one CLI.</li>
+          <li>Forwarded requests always use <code>POST</code>; original headers and body are preserved.</li>
+          <li>Hop-by-hop headers (e.g. <code>Connection</code>, <code>Transfer-Encoding</code>) are stripped from the response.</li>
+          <li>Host-based slug routing is scaffolded but not enforced; routing uses the <code>id</code> API key.</li>
+        </ul>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <span>Portly · lightweight webhook relay</span>
+      <a href="https://github.com/jadejashaktisinh/portly">GitHub</a>
+    </footer>
+  </body>
+</html>

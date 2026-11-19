@@ -11,9 +11,23 @@
 		reverse_proxy 127.0.0.1:8000
 	}
 
-	@assets path /styles.css /app.js
+	@assets path /app.js /styles.css /site.css
 	handle @assets {
 		root * /app/dashboard
+		file_server
+	}
+
+	@app path /dashboard /dashboard/
+	handle @app {
+		root * /app/dashboard
+		rewrite * /app.html
+		file_server
+	}
+
+	@docs path /docs /docs/
+	handle @docs {
+		root * /app/dashboard
+		rewrite * /docs.html
 		file_server
 	}
 

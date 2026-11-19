@@ -3,101 +3,88 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Portly — Webhook Dashboard</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>Portly — Forward webhooks to your local server</title>
+    <link rel="stylesheet" href="/site.css" />
   </head>
   <body>
-    <div id="app">
-      <section id="auth-view" class="auth-card">
-        <div class="brand">
-          <span class="brand-mark">P</span>
-          <div>
-            <h1>Portly</h1>
-            <p>Webhook delivery dashboard</p>
-          </div>
+    <header class="site-header">
+      <a class="logo" href="/"><span class="logo-mark">P</span> Portly</a>
+      <nav>
+        <a href="/docs">Docs</a>
+        <a class="nav-cta" href="/dashboard">Dashboard</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <span class="eyebrow">Webhook relay · tunnels made simple</span>
+        <h1>Forward webhooks to your<br /><span>local server</span> in seconds.</h1>
+        <p class="lede">
+          Portly exposes a local HTTP server through a relay and replays incoming
+          webhooks to it — with the original status, headers and body returned to
+          the caller. No public IP, no router config.
+        </p>
+        <div class="cta-row">
+          <a class="button primary-button" href="/docs">Read the docs</a>
+          <a class="button secondary-button" href="/dashboard">Open dashboard</a>
         </div>
+        <div class="hero-code">
+          <div class="code-bar"><span></span><span></span><span></span><em>terminal</em></div>
+          <pre><code>portly login
+portly forward http://localhost:3001/webhook
 
-        <div class="tabs" role="tablist">
-          <button id="tab-login" class="tab active" type="button">Sign in</button>
-          <button id="tab-signup" class="tab" type="button">Create account</button>
+curl -X POST "https://portly-wscl.onrender.com/webhook?id=&lt;api-key&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"test","message":"hello"}'</code></pre>
         </div>
-
-        <form id="auth-form" autocomplete="on">
-          <label for="email">Email</label>
-          <input id="email" name="email" type="email" required autocomplete="email" />
-
-          <label for="password">Password</label>
-          <input id="password" name="password" type="password" required autocomplete="current-password" />
-
-          <div id="slug-field" class="hidden">
-            <label for="slug">Slug</label>
-            <input id="slug" name="slug" type="text" pattern="[a-z0-9-]+" minlength="1" maxlength="40" placeholder="my-service" />
-            <small>Lowercase letters, digits and hyphens.</small>
-          </div>
-
-          <p id="auth-error" class="error hidden" role="alert"></p>
-          <button id="auth-submit" class="primary" type="submit">Sign in</button>
-        </form>
       </section>
 
-      <section id="dashboard-view" class="hidden">
-        <header class="topbar">
-          <div class="brand compact">
-            <span class="brand-mark">P</span>
-            <div>
-              <h1>Portly</h1>
-              <p id="user-label"></p>
-            </div>
-          </div>
-          <div class="topbar-actions">
-            <button id="refresh" class="ghost" type="button">Refresh</button>
-            <button id="logout" class="ghost" type="button">Sign out</button>
-          </div>
-        </header>
-
-        <main class="content">
-          <div class="summary">
-            <div class="stat">
-              <span class="stat-label">Deliveries</span>
-              <strong id="total-count">0</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Last delivery</span>
-              <strong id="last-delivery">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Auto-refresh</span>
-              <strong>30s</strong>
-            </div>
-          </div>
-
-          <p id="dashboard-error" class="error hidden" role="alert"></p>
-
-          <div class="panels">
-            <section class="panel list-panel">
-              <div class="panel-heading">
-                <h2>Recent webhooks</h2>
-                <span id="list-count" class="muted"></span>
-              </div>
-              <div id="event-list" class="event-list">
-                <p class="empty">No deliveries yet. Send a webhook to your relay URL.</p>
-              </div>
-            </section>
-
-            <section class="panel detail-panel">
-              <div class="panel-heading">
-                <h2>Details</h2>
-                <button id="copy-id" class="ghost small hidden" type="button">Copy request ID</button>
-              </div>
-              <div id="event-detail">
-                <p class="empty">Select a delivery to inspect it.</p>
-              </div>
-            </section>
-          </div>
-        </main>
+      <section class="features">
+        <article class="feature">
+          <span class="feature-icon">⇄</span>
+          <h2>Real HTTP passthrough</h2>
+          <p>The local server's status code, headers and body are returned to the original caller — not just a 200 acknowledgement.</p>
+        </article>
+        <article class="feature">
+          <span class="feature-icon">≡</span>
+          <h2>Delivery history</h2>
+          <p>Every authenticated webhook is stored with its headers, body, response status and duration. Browse it in the dashboard.</p>
+        </article>
+        <article class="feature">
+          <span class="feature-icon">⌁</span>
+          <h2>Built to recover</h2>
+          <p>Concurrent deliveries, keepalive pings and automatic CLI reconnect after a relay restart or cold start.</p>
+        </article>
+        <article class="feature">
+          <span class="feature-icon">⛨</span>
+          <h2>Key-based routing</h2>
+          <p>Relay endpoints validate your API key against the database; keys live in your OS keyring, never in plain text logs.</p>
+        </article>
       </section>
-    </div>
 
-    <script src="/app.js"></script>
+      <section class="flow">
+        <h2>How it works</h2>
+        <div class="flow-steps">
+          <div class="flow-step"><strong>1</strong><span>Sign in with the CLI and store your API key in the OS keyring.</span></div>
+          <div class="flow-step"><strong>2</strong><span>Start <code>portly forward</code> to open a WebSocket to the relay.</span></div>
+          <div class="flow-step"><strong>3</strong><span>Send a webhook to the relay URL with your key as <code>id</code>.</span></div>
+          <div class="flow-step"><strong>4</strong><span>Your local server responds; the relay returns it to the caller and logs the delivery.</span></div>
+        </div>
+      </section>
+
+      <section class="bottom-cta">
+        <h2>Ready to try it?</h2>
+        <p>Read the API reference and quick start, then open the dashboard to inspect your deliveries.</p>
+        <div class="cta-row">
+          <a class="button primary-button" href="/docs">View docs</a>
+          <a class="button secondary-button" href="/dashboard">Go to dashboard</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Portly · lightweight webhook relay</span>
+      <a href="https://github.com/jadejashaktisinh/portly">GitHub</a>
+    </footer>
   </body>
 </html>
