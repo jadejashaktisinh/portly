@@ -4,10 +4,11 @@ import jwt from "jsonwebtoken";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import db from "../providers/db.js";
+import { config } from "../config.js";
 import { validateLoginInput, validateSignupInput } from "../validation.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 
-const JWT_SECRET = process.env.JWT_SECRET!;
+const JWT_SECRET = config.jwtSecret;
 
 function isUniqueViolation(error: unknown): boolean {
 	return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
