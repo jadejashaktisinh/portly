@@ -33,7 +33,7 @@ portly/
 | Component       | Stack                              | Default port | Purpose                                             |
 | --------------- | ---------------------------------- | ------------ | --------------------------------------------------- |
 | `node-backend`  | Node.js, Express, Prisma, Postgres | `3000`       | Signup/login, issues JWT and permanent API keys     |
-| `relay-server`  | Go, Gorilla WebSocket, pgx         | `8000`       | `/ws` client connections, `/webhook` ingestion      |
+| `relay-server`  | Go, Gorilla WebSocket, pgx         | `8000`       | `/ws` clients, `/webhook` ingestion, API key checks |
 | `go-cli`        | Go, Cobra, go-keyring              | —            | `portly login` and `portly forward` commands        |
 
 See [`go-cli/README.md`](go-cli/README.md) for CLI-specific documentation.
@@ -71,22 +71,25 @@ npm run dev
 
 The server listens on `http://localhost:3000` by default and exposes:
 
-| Method | Route          | Description                                  |
-| ------ | -------------- | -------------------------------------------- |
-| `POST` | `/auth/signup` | Create a user; returns JWT and API key       |
-| `POST` | `/auth/login`  | Authenticate; returns JWT and API key        |
+| Method | Route          | Description                                                     |
+| ------ | -------------- | --------------------------------------------------------------- |
+| `POST` | `/auth/signup` | Create a user; returns JWT and API key                          |
+| `POST` | `/auth/login`  | Authenticate; returns JWT and API key                           |
+| `GET`  | `/auth/me`     | Return the authenticated user (requires `Authorization: Bearer`) |
 
-Signup body: `{ "email": "...", "password": "...", "slug": "..." }`. The `slug` is stored on the user for future subdomain-based routing.
+Signup body: `{ "email": "...", "password": "...", "slug": "..." }`. Passwords must be at least 8 characters; slugs are 1–40 lowercase letters, digits or hyphens. The `slug` is stored on the user for future subdomain-based routing.
 
 ### 3. Run the relay server
 
 ```bash
 cd relay-server
-# create .env with:
+# create .env with (must point to the same database as node-backend):
 # DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<db>
 go mod download
 go run .
 ```
+
+The relay validates the `id` API key against PostgreSQL on both endpoints, so it will not start without a reachable database.
 
 The relay listens on `http://localhost:8000`:
 
@@ -127,7 +130,7 @@ curl -X POST "http://localhost:8000/webhook?id=<your-api-key>" \
   -d '{"event":"test","message":"hello from portly"}'
 ```
 
-The `Host` header must contain a dot because the relay splits it to extract the user slug. The request is forwarded to your local server and its response is returned through the relay.
+The `Host` header must contain a dot because the relay splits it to extract the user slug. The request is forwarded to your local server; its status code, headers and body are returned to the original caller. Use the API key from `portly login` as `id`.
 
 ## Configuration
 
@@ -150,9 +153,9 @@ An optional `PORT` environment variable overrides the default port `3000`.
 
 ### `relay-server/.env`
 
-| Variable       | Description                  |
-| -------------- | ---------------------------- |
-| `DATABASE_URL` | PostgreSQL connection string |
+| Variable       | Description                                               |
+| -------------- | --------------------------------------------------------- |
+| `DATABASE_URL` | PostgreSQL connection string (same database as the API)   |
 
 ### `go-cli/.env`
 
@@ -166,7 +169,10 @@ An optional `PORT` environment variable overrides the default port `3000`.
 ## Development notes
 
 - The relay server currently routes webhooks by the `id` query parameter (the user's API key) rather than the `Host` header. Host parsing for slug-based routing is scaffolded but not enforced.
-- The relay caps forwarded request bodies at 1 MB.
+- Both relay endpoints validate `id` against the `User.apiKey` column, so the relay shares a database with the API server. WebSocket origins are restricted by Gorilla's default same-origin check.
+- The relay rejects request bodies larger than 1 MB with HTTP `413`.
 - The CLI replays all forwarded requests as `POST`, passing along the original headers and body.
+- The CLI forwards the local server's status code and response headers back to the relay (hop-by-hop headers are stripped), which returns them to the caller.
+- A single webhook waits at most 30 seconds for the local server; the CLI uses a 25 second timeout per local request and returns `502` if it fails.
+- Concurrent webhooks are supported per client; the CLI processes up to 16 local requests in parallel.
 - The API server stores users in PostgreSQL via Prisma; run `npx prisma migrate dev` after schema changes.
-- The webhook handler writes a greeting before forwarding, so the local server's status code and response headers are not propagated to the caller; only the body is appended.

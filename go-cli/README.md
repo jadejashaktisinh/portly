@@ -15,7 +15,7 @@ Webhook / HTTP request
 
 1. `portly login` authenticates against the API and stores your API key in the operating system's keyring.
 2. `portly forward <local-url>` opens a WebSocket connection to the relay server.
-3. Each request the relay receives is pushed to the CLI over the WebSocket; the CLI replays it as an HTTP `POST` to your local URL and sends the response back through the relay.
+3. Each request the relay receives is pushed to the CLI over the WebSocket; the CLI replays it as an HTTP `POST` to your local URL and sends the status code, response headers and body back through the relay.
 
 ## Prerequisites
 
@@ -80,7 +80,6 @@ go-cli/
 ├── main.go          # Entry point
 ├── cmd/
 │   ├── root.go      # Root Cobra command
-│   ├── portly.go    # `portly` command
 │   ├── login.go     # `login` command: authentication + keyring storage
 │   └── forward.go   # `forward` command: WebSocket listener and local request forwarding
 ├── .env.example     # Environment variable template
@@ -96,4 +95,4 @@ go-cli/
 
 ## License
 
-See the [LICENSE](../LICENSE) file in the repository root.
+No license has been specified for this project yet.
