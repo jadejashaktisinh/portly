@@ -8,8 +8,8 @@ export interface AuthRequest extends Request {
 }
 
 export function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
+  const [scheme, token] = req.headers.authorization?.split(' ') ?? [];
+  if (scheme !== 'Bearer' || !token) {
     res.status(401).json({ error: 'No token provided' });
     return;
   }
