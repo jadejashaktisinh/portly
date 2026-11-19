@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,11 +21,17 @@ import (
 
 type LoginResponse struct {
 	Token string `json:"token"`
+	Error string `json:"error"`
 	User  struct {
 		ID     string `json:"id"`
 		Email  string `json:"email"`
 		APIKey string `json:"apiKey"`
 	} `json:"user"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 // loginCmd represents the login command
@@ -55,17 +62,13 @@ var loginCmd = &cobra.Command{
 		email = strings.TrimSpace(email)
 		password = strings.TrimSpace(password)
 
-		// 4. Print the captured email and password (for demonstration purposes)
-		fmt.Printf("Hello, %s!\n", email)
-		fmt.Printf("Your password is: %s\n", password)
-
 		login(email, password)
 
 	},
 }
 
 func init() {
-	portlyCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(loginCmd)
 
 	// Here you will define your flags and configuration settings.
 
@@ -87,29 +90,43 @@ func login(email, password string) {
 	serverUrl := os.Getenv("NODE_SERVER_URL")
 	service := os.Getenv("CLI_SERVICE_NAME")
 	user := os.Getenv("CLI_USER_NAME")
-	res, err := http.Post(serverUrl+"/auth/login", "application/json", strings.NewReader(fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)))
+
+	payload, err := json.Marshal(loginRequest{Email: email, Password: password})
+	if err != nil {
+		log.Fatal("Error encoding login request:", err)
+	}
+
+	res, err := http.Post(serverUrl+"/auth/login", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Fatal("Error sending login request:", err)
 	}
 	defer res.Body.Close()
 
 	rawBody, err := io.ReadAll(res.Body)
-	jsonResponse := LoginResponse{}
-	err = json.Unmarshal(rawBody, &jsonResponse)
 	if err != nil {
+		log.Fatal("Error reading login response:", err)
+	}
+
+	jsonResponse := LoginResponse{}
+	if err := json.Unmarshal(rawBody, &jsonResponse); err != nil {
 		log.Fatal("Error parsing JSON response:", err)
 	}
 
-	if res.StatusCode == http.StatusOK {
-		fmt.Println("Login successful!", jsonResponse.User.APIKey)
-		// 1. Store the secret string
-		err := keyring.Set(service, user, jsonResponse.User.APIKey)
-		if err != nil {
-			log.Fatalf("Failed to set secret: %v", err)
+	if res.StatusCode != http.StatusOK {
+		message := jsonResponse.Error
+		if message == "" {
+			message = http.StatusText(res.StatusCode)
 		}
-		fmt.Println("Secret stored successfully!")
-
-	} else {
-		fmt.Printf("Login failed with status code: %d %s\n", res.StatusCode, jsonResponse.User.APIKey)
+		fmt.Printf("Login failed: %s\n", message)
+		os.Exit(1)
 	}
+
+	if jsonResponse.User.APIKey == "" {
+		log.Fatal("Login response did not contain an API key")
+	}
+
+	if err := keyring.Set(service, user, jsonResponse.User.APIKey); err != nil {
+		log.Fatalf("Failed to store API key: %v", err)
+	}
+	fmt.Println("Login successful. API key stored in the system keyring.")
 }
