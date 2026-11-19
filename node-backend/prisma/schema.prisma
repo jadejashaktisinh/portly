@@ -7,10 +7,30 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
+  id        String         @id @default(cuid())
+  email     String         @unique
   password  String
-  apiKey    String   @unique
-  slug      String   @unique
-  createdAt DateTime @default(now())
+  apiKey    String         @unique
+  slug      String         @unique
+  createdAt DateTime       @default(now())
+  events    WebhookEvent[]
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  requestId  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method     String
+  host       String
+  slug       String?
+  path       String
+  headers    Json
+  body       String?
+  statusCode Int?
+  durationMs Int?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
