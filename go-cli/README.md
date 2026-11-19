@@ -63,7 +63,7 @@ You will be prompted for your email and password. On success the API key is save
 ./portly forward http://localhost:3000
 ```
 
-The CLI connects to `RELAY_SERVER_URL/ws` and forwards every incoming request to the given local URL. Press `Ctrl+C` to stop forwarding.
+The CLI connects to `RELAY_SERVER_URL/ws` and forwards every incoming request to the given local URL. Press `Ctrl+C` to stop forwarding. Each delivery is recorded by the relay and can be inspected later via `GET /events` on the API server.
 
 ### Help
 
