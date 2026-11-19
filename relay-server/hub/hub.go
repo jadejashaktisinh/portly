@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -8,75 +9,101 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type client = struct {
+var ErrClientNotFound = errors.New("client not found")
+
+type Client struct {
 	LocalUrl string
 	Conn     *websocket.Conn
 }
 
-type LocalResponse = struct {
+type LocalResponse struct {
 	ResponseId string
 	StatusCode int
 	Header     http.Header
 	Body       string
-	Writer     http.ResponseWriter
 }
 
 type Message struct {
-	Id        string
-	Body      string
-	LocalUrl  string
-	Header    http.Header
-	RequestId string
+	Id         string
+	Body       string
+	LocalUrl   string
+	Header     http.Header
+	StatusCode int
+	RequestId  string
 }
 
 var (
-	clients          = map[string]chan client{}
-	LocalResponses   = map[string]chan LocalResponse{}
-	clientsMu        sync.Mutex
-	LocalResponsesMu sync.Mutex
+	clients       = map[string]Client{}
+	clientsMu     sync.RWMutex
+	clientWriteMu sync.Mutex
+
+	localResponses   = map[string]chan LocalResponse{}
+	localResponsesMu sync.Mutex
 )
 
-func AddClient(id string, localUrl string, conn *websocket.Conn) {
+func AddClient(id string, localUrl string, conn *websocket.Conn) bool {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
-	clients[id] = make(chan client, 1)
-	clients[id] <- client{LocalUrl: localUrl, Conn: conn}
-}
-
-func RemoveClient(id string) {
-	clientsMu.Lock()
-	clientCh, ok := clients[id]
-	if ok {
-		close(clientCh)
+	if _, exists := clients[id]; exists {
+		return false
 	}
-	delete(clients, id)
-	clientsMu.Unlock()
-	log.Println("disconnected:", id)
+	clients[id] = Client{LocalUrl: localUrl, Conn: conn}
+	return true
 }
 
-func GetClientChannel(id string) chan client {
+func RemoveClient(id string, conn *websocket.Conn) {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
-	return clients[id]
-}
-
-func CreateLocalResponseChannel(requestId string) {
-	LocalResponsesMu.Lock()
-	defer LocalResponsesMu.Unlock()
-	LocalResponses[requestId] = make(chan LocalResponse, 1)
-}
-
-func GetLocalResponseChannel(requestId string) chan LocalResponse {
-	LocalResponsesMu.Lock()
-	defer LocalResponsesMu.Unlock()
-	return LocalResponses[requestId]
-}
-
-func UpdateLocalResponseChannel(response LocalResponse) {
-	LocalResponsesMu.Lock()
-	ch, ok := LocalResponses[response.ResponseId]
-	if ok {
-		ch <- response
+	if current, ok := clients[id]; ok && current.Conn == conn {
+		delete(clients, id)
+		log.Println("client disconnected")
 	}
-	LocalResponsesMu.Unlock()
+}
+
+func GetClient(id string) (Client, bool) {
+	clientsMu.RLock()
+	defer clientsMu.RUnlock()
+	client, ok := clients[id]
+	return client, ok
+}
+
+func SendToClient(id string, msg Message) error {
+	client, ok := GetClient(id)
+	if !ok {
+		return ErrClientNotFound
+	}
+	clientWriteMu.Lock()
+	defer clientWriteMu.Unlock()
+	return client.Conn.WriteJSON(msg)
+}
+
+func CreateLocalResponseChannel(requestId string) <-chan LocalResponse {
+	localResponsesMu.Lock()
+	defer localResponsesMu.Unlock()
+	ch := make(chan LocalResponse, 1)
+	localResponses[requestId] = ch
+	return ch
+}
+
+func GetLocalResponseChannel(requestId string) <-chan LocalResponse {
+	localResponsesMu.Lock()
+	defer localResponsesMu.Unlock()
+	return localResponses[requestId]
+}
+
+func ResolveLocalResponse(response LocalResponse) {
+	localResponsesMu.Lock()
+	defer localResponsesMu.Unlock()
+	if ch, ok := localResponses[response.ResponseId]; ok {
+		select {
+		case ch <- response:
+		default:
+		}
+	}
+}
+
+func RemoveLocalResponse(requestId string) {
+	localResponsesMu.Lock()
+	defer localResponsesMu.Unlock()
+	delete(localResponses, requestId)
 }

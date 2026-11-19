@@ -1,26 +1,36 @@
 package webhook
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"io"
-	"jadejashaktisinh/relay-server/hub"
 	"log"
 	"net/http"
 	"strings"
+	"time"
+
+	"jadejashaktisinh/relay-server/db"
+	"jadejashaktisinh/relay-server/hub"
 )
 
+const (
+	maxBodySize    = 1 << 20
+	localTimeout   = 30 * time.Second
+	validationTime = 5 * time.Second
+)
+
+var validateAPIKey = db.ValidateAPIKey
+
 func HandleWebhook(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello, World! from webhook domain "+r.Host)
 	hostname := r.Host
 	if hostname == "" {
 		http.Error(w, "Host header is required", http.StatusBadRequest)
 		return
 	}
 	slug, domain, found := strings.Cut(hostname, ".")
-
-	fmt.Printf("Received webhook request for slug: %s, domain: %s found: %t\n", slug, domain, found)
+	log.Printf("Received webhook request for slug: %s, domain: %s found: %t", slug, domain, found)
 	if !found {
 		http.Error(w, "Invalid Host header format", http.StatusBadRequest)
 		return
@@ -30,64 +40,80 @@ func HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func HandleSend(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	log.Println("got new message:")
+	if id == "" {
+		http.Error(w, "id query parameter is required", http.StatusBadRequest)
+		return
+	}
 
-	maxBodySize := int64(1024 * 1024)
-	limitedReader := io.LimitReader(r.Body, maxBodySize)
-
-	body, err := io.ReadAll(limitedReader)
-	log.Println("got new message:", id, string(body))
-	header := r.Header
+	ctx, cancel := context.WithTimeout(r.Context(), validationTime)
+	defer cancel()
+	valid, err := validateAPIKey(ctx, id)
 	if err != nil {
+		log.Printf("API key validation failed: %v", err)
+		http.Error(w, "could not validate API key", http.StatusServiceUnavailable)
+		return
+	}
+	if !valid {
+		http.Error(w, "invalid API key", http.StatusUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
+	log.Printf("received webhook request (%d bytes)", len(body))
 
-	clientCh := hub.GetClientChannel(id)
+	reqId, err := GenerateRandomID(8)
+	if err != nil {
+		log.Printf("failed to generate request id: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
-	reqId, _ := GenerateRandomID(8)
-	if clientCh == nil {
-		http.Error(w, "client not found", http.StatusNotFound)
+	client, ok := hub.GetClient(id)
+	if !ok {
+		http.Error(w, "client not connected", http.StatusNotFound)
+		return
+	}
+
+	responseCh := hub.CreateLocalResponseChannel(reqId)
+	defer hub.RemoveLocalResponse(reqId)
+
+	jsonData := hub.Message{
+		Id:        id,
+		Body:      string(body),
+		LocalUrl:  client.LocalUrl,
+		Header:    r.Header,
+		RequestId: reqId,
+	}
+	log.Printf("forwarding request %s to %s", reqId, client.LocalUrl)
+	if err := hub.SendToClient(id, jsonData); err != nil {
+		log.Printf("failed to forward request %s: %v", reqId, err)
+		http.Error(w, "failed to send message", http.StatusBadGateway)
 		return
 	}
 
 	select {
-	case client := <-clientCh:
-		log.Printf("generated requestId: %s for id: %s", reqId, id)
-
-		// create channel BEFORE sending so the response handler never misses it
-		hub.CreateLocalResponseChannel(reqId)
-
-		jsonData := hub.Message{Id: id, Body: string(body), LocalUrl: client.LocalUrl, Header: header, RequestId: reqId}
-		log.Println("sending message to:", id, "json:", jsonData)
-		err := client.Conn.WriteJSON(jsonData)
-		clientCh <- client
-		if err != nil {
-			log.Println("write error:", err)
-			hub.LocalResponsesMu.Lock()
-			delete(hub.LocalResponses, reqId)
-			hub.LocalResponsesMu.Unlock()
-			http.Error(w, "failed to send message", http.StatusInternalServerError)
-			return
-		}
-
-		// block until CLI sends the response back
-		localResponse := <-hub.GetLocalResponseChannel(reqId)
-		hub.LocalResponsesMu.Lock()
-		delete(hub.LocalResponses, reqId)
-		hub.LocalResponsesMu.Unlock()
-
-		w.WriteHeader(localResponse.StatusCode)
+	case localResponse := <-responseCh:
 		for key, values := range localResponse.Header {
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
 		}
+		w.WriteHeader(localResponse.StatusCode)
 		w.Write([]byte(localResponse.Body))
-	default:
-		http.Error(w, "client not connected", http.StatusBadRequest)
-		return
+	case <-time.After(localTimeout):
+		log.Printf("request %s timed out waiting for local server", reqId)
+		http.Error(w, "local server timed out", http.StatusGatewayTimeout)
 	}
 }
 
